@@ -35,7 +35,7 @@ const num = (v?: number) => (Number.isFinite(v) ? (v as number) : -Infinity)
 
 export function App() {
   const { config, error: configError } = useConfig()
-  const { nodes, errors } = useNodes(config)
+  const { nodes, errors, pool } = useNodes(config)
 
   const [view, setView] = useState<View>(initialView)
   const [sort, setSort] = useState<Sort>(initialSort)
@@ -147,6 +147,7 @@ export function App() {
         const br = rank.get(b.meta?.region?.trim().toUpperCase() || '') ?? Infinity
         cmp = ar - br
       }
+      else if (sort === 'default') cmp = (a.meta?.order ?? 0) - (b.meta?.order ?? 0)
 
       return cmp || displayName(a).localeCompare(displayName(b))
     })
@@ -247,6 +248,7 @@ export function App() {
         node={selectedNode}
         onClose={() => setSelected(null)}
         showSource={(config.site_tokens?.length ?? 0) > 1}
+        pool={pool}
       />
     </div>
   )

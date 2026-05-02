@@ -44,12 +44,13 @@ const META_KEYS = [
   'metadata_virtualization',
   'metadata_latitude',
   'metadata_longitude',
+  'metadata_order',
 ]
 const DYN_INTERVAL_MS = 2000
 const HISTORY_LIMIT = 60
 
 function emptyMeta(): NodeMeta {
-  return { name: '', region: '', tags: [], hidden: false, virtualization: '', lat: null, lng: null }
+  return { name: '', region: '', tags: [], hidden: false, virtualization: '', lat: null, lng: null, order: 0 }
 }
 
 function blankAgent(uuid: string, source: string): Agent {
@@ -59,6 +60,7 @@ function blankAgent(uuid: string, source: string): Agent {
 function parseMeta(raw: Record<string, unknown>): NodeMeta {
   const lat = Number(raw.metadata_latitude)
   const lng = Number(raw.metadata_longitude)
+  const order = Number(raw.metadata_order)
   return {
     name: raw.metadata_name ? String(raw.metadata_name) : '',
     region: raw.metadata_region ? String(raw.metadata_region) : '',
@@ -67,6 +69,7 @@ function parseMeta(raw: Record<string, unknown>): NodeMeta {
     virtualization: raw.metadata_virtualization ? String(raw.metadata_virtualization) : '',
     lat: Number.isFinite(lat) ? lat : null,
     lng: Number.isFinite(lng) ? lng : null,
+    order: Number.isFinite(order) ? order : 0,
   }
 }
 
@@ -93,6 +96,7 @@ export function useNodes(config: SiteConfig | null) {
   const [errors, setErrors] = useState<BackendError[]>([])
   const [loading, setLoading] = useState(true)
   const [tick, setTick] = useState(0)
+  const [pool, setPool] = useState<BackendPool | null>(null)
 
   useEffect(() => {
     if (!config?.site_tokens?.length) {
@@ -100,6 +104,7 @@ export function useNodes(config: SiteConfig | null) {
       return
     }
     const pool = new BackendPool(config.site_tokens)
+    setPool(pool)
     const sourceUuids = new Map<string, string[]>()
 
     const bootstrap = async () => {
@@ -206,6 +211,7 @@ export function useNodes(config: SiteConfig | null) {
       clearInterval(dynTimer)
       clearInterval(clockTimer)
       document.removeEventListener('visibilitychange', onVisible)
+      setPool(null)
       pool.close()
     }
   }, [config])
@@ -225,5 +231,5 @@ export function useNodes(config: SiteConfig | null) {
     return out
   }, [agents, live, history, tick])
 
-  return { nodes, errors, loading }
+  return { nodes, errors, loading, pool }
 }

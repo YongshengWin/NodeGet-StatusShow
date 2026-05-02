@@ -6,6 +6,7 @@ export interface NodeMeta {
   virtualization: string
   lat: number | null
   lng: number | null
+  order: number
 }
 
 export interface StaticSystem {
@@ -90,6 +91,32 @@ export interface SiteConfig {
   site_tokens: { name: string; backend_url: string; token: string }[]
 }
 
+export interface TaskQueryResult {
+  task_id: number
+  timestamp: number
+  uuid: string
+  success: boolean
+  error_message?: string | null
+  cron_source?: string
+  task_event_type?: Record<string, string>
+  task_event_result: Record<string, unknown> | null
+}
+
+export interface TaskQueryCondition {
+  task_id?: number
+  uuid?: string
+  timestamp_from_to?: [number, number]
+  timestamp_from?: number
+  timestamp_to?: number
+  is_success?: boolean
+  is_failure?: boolean
+  is_running?: boolean
+  type?: string
+  cron_source?: string
+  limit?: number
+  last?: null
+}
+
 export type View = 'cards' | 'table'
 
 export type Sort =
@@ -102,6 +129,8 @@ export type Sort =
   | 'netIn'
   | 'netOut'
   | 'uptime'
+
+export type LatencyType = 'ping' | 'tcp_ping'
 
 export interface Usage {
   cpu?: number
