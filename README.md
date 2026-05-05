@@ -15,8 +15,45 @@ build 完是纯静态站 丢哪都行
 
 ## 一键部署
 
-Fork本仓库 修改public/config.json 然后再cloudflare pages / vercel 直接摁部署 绑定域名
-要更新就在GitHub仓库摁 sync就行
+推荐做法是：
+
+1. Fork 本仓库到你自己的 GitHub
+2. 不要把真实 token 直接提交到 `public/config.json`
+3. 在 Cloudflare 里绑定你的 GitHub 仓库，开启自动构建部署
+4. 在 Cloudflare 的构建环境变量里配置 `SITE_NAME` / `SITE_FOOTER` / `SITE_1`
+5. 以后上游有更新时，在 GitHub 点 `Sync fork`，Cloudflare 会自动重新部署
+
+仓库里的 `public/config.json` 建议只保留示例值，真实配置交给 Cloudflare 环境变量注入
+
+## Cloudflare 自动部署
+
+如果你用的是 Cloudflare Workers 静态资源部署，推荐配置：
+
+- Build command: `npm run build`
+- Output directory: `dist`
+- Root directory: 仓库根目录
+
+把下面这些环境变量加到 Cloudflare 的生产环境：
+
+```env
+SITE_NAME=针针
+SITE_LOGO=
+SITE_FOOTER=小针针
+SITE_1=name="macmini",backend_url="wss://dmit.115emby.top:52443",token="你的真实 token"
+```
+
+示例文件见 `.env.production.example`
+
+这样构建时会自动执行 `scripts/build-config.mjs`，把环境变量写进最终产物里的 `config.json`
+
+## 更新流程
+
+以后只需要：
+
+1. 在 GitHub 打开你自己的 fork
+2. 点击 `Sync fork`
+3. 点击 `Update branch`
+4. 等 Cloudflare 自动触发新一轮 build 和 deployment
 
 # 环境变量
 
