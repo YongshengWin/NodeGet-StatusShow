@@ -1,6 +1,8 @@
 # NodeGet-StatusShow
 
-一个服务器状态展示页
+一个服务器状态展示页，NodeGet的公开探针页面
+
+欢迎开发者基于此版本进行定制，也欢迎 pr 到本项目
 
 ## 开发
 
@@ -9,55 +11,50 @@ npm i
 npm run dev
 ```
 
-# 部署
+## 基于静态文件部署
 
-build 完是纯静态站 丢哪都行
+本项目 build 完是纯静态站， 丢哪都行
 
-## 一键部署
+官方准备了一份可以直接下载的编译结果，方便需要把静态文件部署到其他地方的用户
 
-推荐做法是：
+此下载链接始终与最新版保持一致，利用cloudflare pages自动编译生成
 
-1. Fork 本仓库到你自己的 GitHub
-2. 不要把真实 token 直接提交到 `public/config.json`
-3. 在 Cloudflare 里绑定你的 GitHub 仓库，开启自动构建部署
-4. 在 Cloudflare 的构建环境变量里配置 `SITE_NAME` / `SITE_FOOTER` / `SITE_1`
-5. 以后上游有更新时，在 GitHub 点 `Sync fork`，Cloudflare 会自动重新部署
+<https://nodeget.pages.dev/NodeGet-StatusShow.zip>
 
-仓库里的 `public/config.json` 建议只保留示例值，真实配置交给 Cloudflare 环境变量注入
+下载后修改 config.json 的信息，然后可以上传到任意静态文件服务，如 nginx、 cloudflare pages、vercel
 
-## Cloudflare 自动部署
+## 基于 cloudflare pages编译部署
 
-如果你用的是 Cloudflare Workers 静态资源部署，推荐配置：
+此为官方最推荐的部署方式，方便升级至新版
 
-- Build command: `npm run build`
-- Output directory: `dist`
-- Root directory: 仓库根目录
+Fork本仓库, 然后在cloudflare pages / vercel 直接部署，绑定域名
 
-把下面这些环境变量加到 Cloudflare 的生产环境：
+设定环境变量 `NODEGET_CONFIG`，需要是有效的JSON字符串
 
-```env
-SITE_NAME=针针
-SITE_LOGO=
-SITE_FOOTER=小针针
-SITE_1=name="macmini",backend_url="wss://dmit.115emby.top:52443",token="你的真实 token"
+```json
+{
+  "user_preferences":{
+    "site_name": "NodeGet Status",
+    "site_logo": "",
+    "footer": "Powered by NodeGet"
+  },
+  "site_tokens": [
+    {
+      "name": "master server node 1",
+      "backend_url": "wss://your-backend.example.com",
+      "token": "YOUR_TOKEN_HERE"
+    }
+  ]
+}
 ```
 
-示例文件见 `.env.production.example`
-
-这样构建时会自动执行 `scripts/build-config.mjs`，把环境变量写进最终产物里的 `config.json`
-
-## 更新流程
-
-以后只需要：
-
-1. 在 GitHub 打开你自己的 fork
-2. 点击 `Sync fork`
-3. 点击 `Update branch`
-4. 等 Cloudflare 自动触发新一轮 build 和 deployment
-
-# 环境变量
+要更新版本则就在 fork 的 GitHub 仓库点击 sync 就行，可以轻松且可控的升级
 
 > 环境变量是 **build 时** 注入的 改完之后必须重新部署一次才会生效 在面板里光改不重新跑 build 是没用的
+
+## 环境变量(旧版)
+
+旧版没有充分考虑扩展性，只支持有限的环境变量
 
 ```
 SITE_NAME=狼牙的探针

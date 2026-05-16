@@ -1,210 +1,244 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ComposableMap, Geographies, Geography, Marker } from 'react-simple-maps'
+import * as echarts from 'echarts'
+import { AlertTriangle, ChevronRight, X } from 'lucide-react'
 import { Card } from './ui/card'
-import { displayName } from '../utils/derive'
+import { Flag } from './Flag'
+import { StatusDot } from './StatusDot'
+import { displayName, distroLogo } from '../utils/derive'
 import type { Node } from '../types'
+
+const MAP_W = 900
+const MAP_H = 520
+const TINY_DEG = 2
+const GEO_URL = `${import.meta.env.BASE_URL}world.geo.json`
+
+const HEAT = [
+  [254, 215, 170],
+  [251, 146, 60],
+  [194, 65, 12],
+]
+
+const cnameMap = new Map<string, string>()
+const knownA2 = new Set<string>()
+const tinyCenter = new Map<string, [number, number]>()
+let mapPromise: Promise<void> | null = null
+
+interface CountryEntry {
+  online: number
+  offline: number
+  nodes: Node[]
+}
 
 interface Props {
   nodes: Node[]
   onOpen?: (uuid: string) => void
 }
 
-const MAP_W = 900
-const MAP_H = 460
-const GEO_URL = `${import.meta.env.BASE_URL}world-110m.json`
-
-const GREEN = 'rgb(16 185 129)'
-const GRAY = 'rgb(148 163 184)'
-
-const geoBase = {
-  fill: 'currentColor',
-  fillOpacity: 0.05,
-  stroke: 'currentColor',
-  strokeOpacity: 0.22,
-  strokeWidth: 0.5,
-  outline: 'none',
-}
-const GEO_STYLE = {
-  default: geoBase,
-  hover: { ...geoBase, fillOpacity: 0.08, strokeOpacity: 0.3 },
-  pressed: geoBase,
+function ringBbox(ring: number[][]) {
+  let minLng = Infinity
+  let maxLng = -Infinity
+  let minLat = Infinity
+  let maxLat = -Infinity
+  for (const [lng, lat] of ring) {
+    if (lng < minLng) minLng = lng
+    if (lng > maxLng) maxLng = lng
+    if (lat < minLat) minLat = lat
+    if (lat > maxLat) maxLat = lat
+  }
+  return { minLng, maxLng, minLat, maxLat, w: maxLng - minLng, h: maxLat - minLat }
 }
 
-const ptr = { cursor: 'pointer' }
-const CURSOR = { default: ptr, hover: ptr, pressed: ptr }
+function tinyMeta(geometry: any): { center: [number, number]; size: number } | null {
+  if (!geometry?.coordinates) return null
+  const polygons = geometry.type === 'MultiPolygon' ? geometry.coordinates : [geometry.coordinates]
+  let best: ReturnType<typeof ringBbox> | null = null
+  let bestArea = -1
+  for (const poly of polygons) {
+    const outer = poly[0]
+    if (!outer) continue
+    const bb = ringBbox(outer)
+    const area = bb.w * bb.h
+    if (area > bestArea) {
+      bestArea = area
+      best = bb
+    }
+  }
+  if (!best) return null
+  return {
+    center: [(best.minLng + best.maxLng) / 2, (best.minLat + best.maxLat) / 2],
+    size: Math.max(best.w, best.h),
+  }
+}
 
-function groupKey(lat: number, lng: number) {
-  return `${lat.toFixed(3)},${lng.toFixed(3)}`
+function heatColor(t: number) {
+  const x = Math.min(1, Math.max(0, t))
+  const seg = x >= 0.5 ? 1 : 0
+  const f = (x - seg * 0.5) * 2
+  const a = HEAT[seg]
+  const b = HEAT[seg + 1]
+  const r = Math.round(a[0] + (b[0] - a[0]) * f)
+  const g = Math.round(a[1] + (b[1] - a[1]) * f)
+  const c = Math.round(a[2] + (b[2] - a[2]) * f)
+  return `rgb(${r},${g},${c})`
+}
+
+function ensureMap() {
+  if (!mapPromise) {
+    mapPromise = fetch(GEO_URL)
+      .then(r => r.json())
+      .then(geo => {
+        for (const f of geo.features ?? []) {
+          const a2 = f.properties?.name
+          if (!a2) continue
+          knownA2.add(a2)
+          if (f.properties?.cname) cnameMap.set(a2, f.properties.cname)
+          const m = tinyMeta(f.geometry)
+          if (m && m.size < TINY_DEG) tinyCenter.set(a2, m.center)
+        }
+        echarts.registerMap('world', geo)
+      })
+      .catch(err => {
+        mapPromise = null
+        throw err
+      })
+  }
+  return mapPromise
 }
 
 export function WorldMap({ nodes, onOpen }: Props) {
-  const [openKey, setOpenKey] = useState<string | null>(null)
-  const [renderKey, setRenderKey] = useState<string | null>(null)
-  const closeTimer = useRef<number | null>(null)
+  const [ready, setReady] = useState(false)
+  const [error, setError] = useState<Error | null>(null)
+  const [pickedA2, setPickedA2] = useState<string | null>(null)
+  const [renderA2, setRenderA2] = useState<string | null>(null)
+  const wrapRef = useRef<HTMLDivElement | null>(null)
+  const chartRef = useRef<echarts.ECharts | null>(null)
 
   useEffect(() => {
-    if (openKey) setRenderKey(openKey)
-  }, [openKey])
-
-  function cancelClose() {
-    if (closeTimer.current != null) {
-      clearTimeout(closeTimer.current)
-      closeTimer.current = null
+    let cancelled = false
+    ensureMap()
+      .then(() => {
+        if (!cancelled) setReady(true)
+      })
+      .catch(err => {
+        if (!cancelled) setError(err instanceof Error ? err : new Error(String(err)))
+      })
+    return () => {
+      cancelled = true
     }
-  }
-  function scheduleClose() {
-    cancelClose()
-    closeTimer.current = window.setTimeout(() => setOpenKey(null), 150)
-  }
+  }, [])
 
-  const groups = useMemo(() => {
-    const byPos = new Map<string, Node[]>()
+  useEffect(() => {
+    if (pickedA2) {
+      setRenderA2(pickedA2)
+    } else if (renderA2) {
+      const t = window.setTimeout(() => setRenderA2(null), 160)
+      return () => clearTimeout(t)
+    }
+  }, [pickedA2, renderA2])
+
+  const { byCountry, total } = useMemo(() => {
+    const map = new Map<string, CountryEntry>()
+    let total = 0
     for (const n of nodes) {
-      if (n.meta?.lat == null || n.meta?.lng == null) continue
-      const k = groupKey(n.meta.lat, n.meta.lng)
-      const list = byPos.get(k)
-      if (list) list.push(n)
-      else byPos.set(k, [n])
+      const a2 = n.meta?.region?.trim().toUpperCase()
+      if (!a2 || !/^[A-Z]{2}$/.test(a2)) continue
+      total++
+      const e = map.get(a2) || { online: 0, offline: 0, nodes: [] }
+      if (n.online) e.online++
+      else e.offline++
+      e.nodes.push(n)
+      map.set(a2, e)
     }
-    return [...byPos.entries()].map(([key, ns]) => ({
-      key,
-      lat: ns[0].meta.lat!,
-      lng: ns[0].meta.lng!,
-      nodes: ns,
-    }))
+    return { byCountry: map, total }
   }, [nodes])
 
-  const total = groups.reduce((s, g) => s + g.nodes.length, 0)
+  const dataSig = useMemo(
+    () =>
+      [...byCountry.entries()]
+        .map(([k, v]) => `${k}:${v.online}/${v.offline}`)
+        .sort()
+        .join(','),
+    [byCountry],
+  )
+
+  const liveRef = useRef({ byCountry, onOpen })
+  useEffect(() => {
+    liveRef.current = { byCountry, onOpen }
+  })
+
+  const option = useMemo(() => buildOption(byCountry), [dataSig])
+
+  useEffect(() => {
+    if (!ready || !wrapRef.current) return
+    if (!chartRef.current) {
+      chartRef.current = echarts.init(wrapRef.current)
+      chartRef.current.on('click', (p: any) => {
+        const cur = liveRef.current
+        const e = cur.byCountry.get(p.name)
+        if (!e) return
+        if (e.nodes.length === 1) cur.onOpen?.(e.nodes[0].uuid)
+        else setPickedA2(p.name)
+      })
+    }
+    chartRef.current.setOption(option, false)
+  }, [ready, option])
+
+  useEffect(() => {
+    if (!ready || !chartRef.current) return
+    const ro = new ResizeObserver(() => chartRef.current?.resize())
+    if (wrapRef.current) ro.observe(wrapRef.current)
+    return () => ro.disconnect()
+  }, [ready])
+
+  useEffect(() => {
+    return () => {
+      chartRef.current?.dispose()
+      chartRef.current = null
+    }
+  }, [])
+
+  const renderEntry = renderA2 ? byCountry.get(renderA2) ?? null : null
 
   return (
     <Card className="p-3 sm:p-4">
+      <div className="flex items-center mb-3 px-1">
+        <div className="text-sm font-semibold text-foreground/90">地理位置</div>
+      </div>
+
       <div
-        className="relative w-full overflow-hidden rounded-md border border-border/60 bg-background/40 text-foreground"
+        className="relative w-full overflow-hidden rounded-md border border-border/60 bg-[hsl(220_15%_8%)]"
         style={{ aspectRatio: `${MAP_W} / ${MAP_H}` }}
-        onClick={() => setOpenKey(null)}
       >
-        <ComposableMap
-          projection="geoEqualEarth"
-          projectionConfig={{ scale: 175 }}
-          width={MAP_W}
-          height={MAP_H}
-          style={{ width: '100%', height: '100%' }}
-        >
-          <defs>
-            <pattern id="map-grid" width="40" height="40" patternUnits="userSpaceOnUse">
-              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="currentColor" strokeOpacity="0.07" strokeWidth="0.5" />
-            </pattern>
-            <radialGradient id="map-vignette" cx="50%" cy="50%" r="75%">
-              <stop offset="55%" stopColor="hsl(var(--background))" stopOpacity="0" />
-              <stop offset="100%" stopColor="hsl(var(--background))" stopOpacity="0.55" />
-            </radialGradient>
-            <filter id="dot-glow" filterUnits="userSpaceOnUse" x="-20" y="-20" width="40" height="40">
-              <feGaussianBlur stdDeviation="2" result="blur" />
-              <feMerge>
-                <feMergeNode in="blur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
-          </defs>
+        <div ref={wrapRef} className="absolute inset-0" />
 
-          <rect x="0" y="0" width={MAP_W} height={MAP_H} fill="url(#map-grid)" />
-
-          <Geographies geography={GEO_URL}>
-            {({ geographies }) =>
-              geographies.map(geo => (
-                <Geography key={geo.rsmKey} geography={geo} style={GEO_STYLE} />
-              ))
-            }
-          </Geographies>
-
-          {groups.map(g => {
-            const isCluster = g.nodes.length > 1
-            const onlineCount = g.nodes.filter(n => n.online).length
-            const color = onlineCount > 0 ? GREEN : GRAY
-            const node = g.nodes[0]
-            const isOpen = openKey === g.key
-
-            return (
-              <Marker
-                key={g.key}
-                coordinates={[g.lng, g.lat]}
-                onMouseEnter={() => {
-                  cancelClose()
-                  setOpenKey(g.key)
-                }}
-                onMouseLeave={scheduleClose}
-                onClick={(e: any) => {
-                  e.stopPropagation?.()
-                  if (!isCluster) onOpen?.(node.uuid)
-                }}
-                style={CURSOR}
-              >
-                <circle r={18} fill="transparent" />
-
-                <circle
-                  r={isOpen ? 14 : 8}
-                  fill="none"
-                  stroke={color}
-                  strokeOpacity="0.45"
-                  strokeWidth="1"
-                  style={{ transition: 'r 0.3s' }}
-                />
-                {isOpen && (
-                  <circle r={22} fill="none" stroke={color} strokeOpacity="0.18" strokeWidth="0.8" />
-                )}
-
-                {onlineCount > 0 && (
-                  <circle r={9} fill={color} opacity={0.18}>
-                    <animate attributeName="r" values="6;13;6" dur="2.4s" repeatCount="indefinite" />
-                    <animate attributeName="opacity" values="0.3;0;0.3" dur="2.4s" repeatCount="indefinite" />
-                  </circle>
-                )}
-
-                <circle
-                  r={isCluster ? 7 : isOpen ? 4.5 : 3.4}
-                  fill={color}
-                  stroke="white"
-                  strokeWidth={isCluster ? 1.2 : 1}
-                  filter="url(#dot-glow)"
-                />
-
-                {isCluster && (
-                  <text y={2.6} textAnchor="middle" fontSize={8} fontWeight={600} fill="white" style={{ pointerEvents: 'none' }}>
-                    {g.nodes.length}
-                  </text>
-                )}
-
-                {renderKey === g.key && (
-                  <ClusterList
-                    nodes={g.nodes}
-                    lat={g.lat}
-                    lng={g.lng}
-                    state={isOpen ? 'open' : 'closed'}
-                    onAnimationEnd={() => {
-                      if (!isOpen) setRenderKey(k => (k === g.key ? null : k))
-                    }}
-                    onPick={uuid => {
-                      setOpenKey(null)
-                      onOpen?.(uuid)
-                    }}
-                    onMouseEnter={cancelClose}
-                    onMouseLeave={scheduleClose}
-                  />
-                )}
-              </Marker>
-            )
-          })}
-
-          <rect x="0" y="0" width={MAP_W} height={MAP_H} fill="url(#map-vignette)" pointerEvents="none" />
-        </ComposableMap>
-
-        {total === 0 && (
-          <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground pointer-events-none">
-            没有节点设置过经纬度
+        {error && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-4 text-center text-sm text-white/80">
+            <AlertTriangle className="h-5 w-5 text-amber-400" />
+            <div>地图加载失败</div>
+            <div className="text-xs text-white/50 break-all">{error.message}</div>
           </div>
         )}
 
-        <div className="absolute bottom-3 right-4 font-mono text-sm font-semibold tracking-wider text-foreground pointer-events-none uppercase">
+        {!error && ready && total === 0 && (
+          <div className="absolute inset-0 flex items-center justify-center text-sm text-white/55 pointer-events-none">
+            没有节点设置过国家代码
+          </div>
+        )}
+
+        {renderEntry && renderA2 && (
+          <NodePopover
+            a2={renderA2}
+            entry={renderEntry}
+            open={pickedA2 === renderA2}
+            onPick={uuid => {
+              setPickedA2(null)
+              onOpen?.(uuid)
+            }}
+            onClose={() => setPickedA2(null)}
+          />
+        )}
+
+        <div className="absolute bottom-3 right-4 z-10 font-mono text-sm font-semibold tracking-wider text-white/85 pointer-events-none uppercase">
           {total} nodes
         </div>
       </div>
@@ -212,62 +246,165 @@ export function WorldMap({ nodes, onOpen }: Props) {
   )
 }
 
-function ClusterList({
-  nodes,
-  lat,
-  lng,
-  state,
-  onAnimationEnd,
+function buildOption(byCountry: Map<string, CountryEntry>) {
+  const entries = [...byCountry.entries()].filter(([a2]) => knownA2.has(a2))
+  const data = entries.map(([a2, e]) => ({ name: a2, value: e.online + e.offline }))
+  const max = data.reduce((m, d) => Math.max(m, d.value), 0)
+  const tinyMarkers = entries
+    .map(([a2, e]) => {
+      const c = tinyCenter.get(a2)
+      if (!c) return null
+      const v = e.online + e.offline
+      const t = max > 0 ? v / max : 0
+      return {
+        name: a2,
+        coord: c,
+        value: v,
+        symbolSize: 6 + Math.min(8, Math.log2(v + 1) * 3),
+        itemStyle: {
+          color: heatColor(0.35 + 0.65 * t),
+          borderColor: 'rgba(20,22,28,0.85)',
+          borderWidth: 0.8,
+          shadowBlur: 8,
+          shadowColor: 'rgba(251,146,60,0.45)',
+        },
+      }
+    })
+    .filter((x): x is NonNullable<typeof x> => x != null)
+
+  return {
+    backgroundColor: 'transparent',
+    visualMap: {
+      type: 'continuous' as const,
+      min: 1,
+      max: Math.max(max, 1),
+      show: max > 0,
+      seriesIndex: 0,
+      left: 16,
+      bottom: 16,
+      itemWidth: 10,
+      itemHeight: 90,
+      orient: 'horizontal' as const,
+      text: ['多', '少'],
+      textStyle: { color: 'rgba(255,255,255,0.55)', fontSize: 10 },
+      inRange: { color: ['#fed7aa', '#fb923c', '#c2410c'] },
+      outOfRange: { color: 'rgba(148,163,184,0.16)' },
+      calculable: false,
+    },
+    tooltip: {
+      trigger: 'item' as const,
+      backgroundColor: 'rgba(20,22,28,0.94)',
+      borderColor: 'rgba(148,163,184,0.3)',
+      borderWidth: 1,
+      padding: [6, 10] as [number, number],
+      textStyle: { color: '#e5e7eb', fontSize: 12 },
+      formatter: (p: any) => {
+        const a2 = p.name
+        const cname = cnameMap.get(a2)
+        const head = cname ? `${cname} <span style="color:#94a3b8">${a2}</span>` : a2
+        const e = byCountry.get(a2)
+        if (!e) return `<b>${head}</b><br/><span style="color:#94a3b8">无节点</span>`
+        const offline = e.offline
+          ? ` <span style="color:#94a3b8">· ${e.offline} 离线</span>`
+          : ''
+        return `<b>${head}</b><br/>${e.online + e.offline} 节点 <span style="color:#34d399">· ${e.online} 在线</span>${offline}`
+      },
+    },
+    series: [
+      {
+        type: 'map' as const,
+        map: 'world',
+        roam: false,
+        zoom: 1.15,
+        layoutCenter: ['50%', '50%'] as [string, string],
+        layoutSize: '100%',
+        selectedMode: false,
+        itemStyle: {
+          areaColor: 'rgba(148,163,184,0.16)',
+          borderColor: 'rgba(148,163,184,0.32)',
+          borderWidth: 0.4,
+        },
+        emphasis: {
+          label: { show: false },
+          itemStyle: { areaColor: '#fb923c' },
+        },
+        label: { show: false },
+        data,
+        markPoint: {
+          symbol: 'circle',
+          label: { show: false },
+          emphasis: { label: { show: false }, scale: 1.3 },
+          data: tinyMarkers,
+        },
+      },
+    ],
+  }
+}
+
+function NodePopover({
+  a2,
+  entry,
+  open,
   onPick,
-  onMouseEnter,
-  onMouseLeave,
+  onClose,
 }: {
-  nodes: Node[]
-  lat: number
-  lng: number
-  state: 'open' | 'closed'
-  onAnimationEnd?: () => void
+  a2: string
+  entry: CountryEntry
+  open: boolean
   onPick: (uuid: string) => void
-  onMouseEnter?: () => void
-  onMouseLeave?: () => void
+  onClose: () => void
 }) {
-  const width = 180
-  const visibleRows = Math.min(nodes.length, 5)
-  const height = visibleRows * 22 + 10
-  const gap = 14
-
-  let x = -width / 2
-  if (lng > 60) x = -width + gap
-  else if (lng < -60) x = -gap
-
-  const below = lat > 25
-  const y = below ? gap : -height - gap
-  const origin = below ? 'origin-top' : 'origin-bottom'
-
+  const cname = cnameMap.get(a2) || a2
   return (
-    <foreignObject x={x} y={y} width={width} height={height} style={{ overflow: 'visible' }}>
-      <div
-        data-state={state}
-        onAnimationEnd={onAnimationEnd}
-        className={`rounded-md border bg-popover text-popover-foreground text-xs shadow-md py-1 max-h-32 overflow-auto ${origin} fill-mode-forwards duration-150 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95`}
-        onClick={e => e.stopPropagation()}
-        onMouseEnter={onMouseEnter}
-        onMouseLeave={onMouseLeave}
-      >
-        {nodes.map(n => (
+    <div
+      data-state={open ? 'open' : 'closed'}
+      className="absolute right-3 top-3 z-20 w-64 rounded-lg border border-border bg-popover text-popover-foreground shadow-xl overflow-hidden origin-top-right duration-150 fill-mode-forwards data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95"
+      onClick={e => e.stopPropagation()}
+      onMouseDown={e => e.stopPropagation()}
+    >
+      <div key={a2} className="animate-in fade-in-0 duration-100 fill-mode-forwards">
+        <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border/70">
+          <Flag code={a2} className="shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-semibold truncate leading-tight">{cname}</div>
+            <div className="text-[11px] text-muted-foreground font-mono mt-0.5">
+              <span className="text-emerald-500">{entry.online} 在线</span>
+              {entry.offline > 0 && <span className="ml-2">{entry.offline} 离线</span>}
+            </div>
+          </div>
           <button
-            key={n.uuid}
-            onClick={() => onPick(n.uuid)}
-            className="w-full flex items-center gap-2 px-2 py-1 hover:bg-accent text-left"
+            onClick={onClose}
+            aria-label="关闭"
+            className="-mr-1 h-6 w-6 inline-flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent shrink-0"
           >
-            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${n.online ? 'bg-emerald-500' : 'bg-slate-400'}`} />
-            <span className="truncate flex-1">{displayName(n)}</span>
-            {n.meta?.region && (
-              <span className="text-[10px] text-muted-foreground shrink-0">{n.meta.region}</span>
-            )}
+            <X className="h-3.5 w-3.5" />
           </button>
-        ))}
+        </div>
+        <div className="max-h-72 overflow-auto py-1">
+          {entry.nodes.map(n => {
+            const logo = distroLogo(n)
+            return (
+              <button
+                key={n.uuid}
+                onClick={() => onPick(n.uuid)}
+                className="group w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-accent text-left transition-colors"
+              >
+                <StatusDot online={n.online} className="w-1.5 h-1.5 ring-1" />
+                {logo && (
+                  <img
+                    src={logo}
+                    alt=""
+                    className="w-3.5 h-3.5 shrink-0 object-contain opacity-80"
+                    loading="lazy"
+                  />
+                )}
+                <span className="truncate flex-1 text-foreground/90">{displayName(n)}</span>
+                <ChevronRight className="h-3 w-3 text-muted-foreground/40 shrink-0 transition-transform group-hover:translate-x-0.5 group-hover:text-muted-foreground" />
+              </button>
+            )
+          })}
+        </div>
       </div>
-    </foreignObject>
+    </div>
   )
 }

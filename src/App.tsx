@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Loader2 } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from './components/ui/alert'
 import { useConfig } from './hooks/useConfig'
@@ -9,9 +9,12 @@ import { Footer } from './components/Footer'
 import { NodeCard } from './components/NodeCard'
 import { NodeTable } from './components/NodeTable'
 import { NodeDetail } from './components/NodeDetail'
-import { WorldMap } from './components/WorldMap'
 import { TagFilter } from './components/TagFilter'
 import { RegionFilter } from './components/RegionFilter'
+
+const WorldMap = lazy(() =>
+  import('./components/WorldMap').then(m => ({ default: m.WorldMap })),
+)
 import { deriveUsage, displayName } from './utils/derive'
 import type { Sort, View } from './types'
 
@@ -177,7 +180,7 @@ export function App() {
     )
   }
 
-  const logo = config.site_logo || DEFAULT_LOGO
+  const logo = config.user_preferences.site_logo || DEFAULT_LOGO
   const empty = list.length === 0
   const hasErrors = errors.length > 0
 
@@ -185,7 +188,7 @@ export function App() {
     <div className="min-h-screen flex flex-col">
       <Background />
       <Navbar
-        siteName={config.site_name || '你没设置'}
+        siteName={config.user_preferences.site_name || '你没设置'}
         logo={logo}
         query={query}
         onQuery={setQuery}
@@ -225,7 +228,17 @@ export function App() {
           </div>
         )}
         {!empty && view === 'table' && <NodeTable nodes={list} onOpen={setSelected} />}
-        {!empty && view === 'map' && <WorldMap nodes={list} onOpen={setSelected} />}
+        {!empty && view === 'map' && (
+          <Suspense
+            fallback={
+              <div className="py-24 flex items-center justify-center text-sm text-muted-foreground">
+                <Loader2 className="h-5 w-5 animate-spin mr-2" /> 加载地图中…
+              </div>
+            }
+          >
+            <WorldMap nodes={list} onOpen={setSelected} />
+          </Suspense>
+        )}
 
         {hasErrors && (
           <Alert variant="warning">
@@ -245,7 +258,7 @@ export function App() {
         )}
       </main>
 
-      <Footer text={config.footer} />
+      <Footer text={config.user_preferences.footer} repo={config.repository} dist_page={config.dist_page}/>
 
       <NodeDetail
         node={selectedNode}
