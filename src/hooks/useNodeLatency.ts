@@ -3,9 +3,12 @@ import { taskQuery } from '../api/methods'
 import type { BackendPool } from '../api/pool'
 import type { TaskQueryResult } from '../types'
 
-const WINDOW_MS = 60 * 60 * 1000
-const REFRESH_MS = 10_000
+export const LATENCY_WINDOW_LABEL = '24 小时'
+
+const WINDOW_MS = 24 * 60 * 60 * 1000
+const REFRESH_MS = 60_000
 const QUERY_TIMEOUT_MS = 20_000
+const QUERY_LIMIT = 20_000
 
 function clean(rows: TaskQueryResult[] | undefined): TaskQueryResult[] {
   return (rows ?? [])
@@ -40,12 +43,12 @@ export function useNodeLatency(
       const [ping, tcp] = await Promise.allSettled([
         taskQuery(
           entry.client,
-          [{ uuid }, { timestamp_from_to: window }, { type: 'ping' }],
+          [{ uuid }, { timestamp_from_to: window }, { type: 'ping' }, { limit: QUERY_LIMIT }],
           QUERY_TIMEOUT_MS,
         ),
         taskQuery(
           entry.client,
-          [{ uuid }, { timestamp_from_to: window }, { type: 'tcp_ping' }],
+          [{ uuid }, { timestamp_from_to: window }, { type: 'tcp_ping' }, { limit: QUERY_LIMIT }],
           QUERY_TIMEOUT_MS,
         ),
       ])

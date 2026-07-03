@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { BackendPool } from '../api/pool'
 import { dynamicSummaryMulti, kvGetMulti, listAgentUuids, staticDataMulti } from '../api/methods'
 import { isOnline } from '../utils/status'
-import type { DynamicSummary, HistorySample, Node, NodeMeta, SiteConfig } from '../types'
+import type { DynamicSummary, HistorySample, Node, NodeMeta, Site_Config as SiteConfig } from '../types'
 
 type Agent = Pick<Node, 'uuid' | 'source' | 'meta' | 'static'>
 

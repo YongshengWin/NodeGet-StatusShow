@@ -24,7 +24,7 @@ import {
   computeLatencyStats,
   type LatencyStats,
 } from '../utils/latency'
-import { useNodeLatency } from '../hooks/useNodeLatency'
+import { LATENCY_WINDOW_LABEL, useNodeLatency } from '../hooks/useNodeLatency'
 import type { BackendPool } from '../api/pool'
 import type { HistorySample, LatencyType, Node, NodeMeta, TaskQueryResult } from '../types'
 
@@ -370,6 +370,13 @@ interface LatencyBlockProps {
 }
 
 const ms = (v: number) => `${v.toFixed(1)} ms`
+const latencyTime = (t: number | string) =>
+  new Date(Number(t)).toLocaleString(undefined, {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 
 function LatencyBlock({ title, rows, type, loading }: LatencyBlockProps) {
   const { data, series } = useMemo(() => buildLatencyChart(rows, type), [rows, type])
@@ -388,7 +395,7 @@ function LatencyBlock({ title, rows, type, loading }: LatencyBlockProps) {
     })
 
   return (
-    <Section title={`${title} · 近 1 小时`}>
+    <Section title={`${title} · 近 ${LATENCY_WINDOW_LABEL}`}>
       <div className="relative h-60">
         {empty && (
           <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
@@ -403,7 +410,7 @@ function LatencyBlock({ title, rows, type, loading }: LatencyBlockProps) {
                 type="number"
                 domain={['dataMin', 'dataMax']}
                 scale="time"
-                tickFormatter={t => new Date(t).toLocaleTimeString()}
+                tickFormatter={latencyTime}
                 tick={{ fontSize: 11 }}
                 stroke="hsl(var(--muted-foreground))"
               />
@@ -416,7 +423,7 @@ function LatencyBlock({ title, rows, type, loading }: LatencyBlockProps) {
               />
               <Tooltip
                 contentStyle={TOOLTIP_STYLE}
-                labelFormatter={t => new Date(Number(t)).toLocaleTimeString()}
+                labelFormatter={latencyTime}
                 formatter={(v: number) => ms(Number(v))}
               />
               {visibleSeries.map(s => (
