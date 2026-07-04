@@ -169,7 +169,7 @@ export function WorldMap({ nodes, onOpen }: Props) {
     liveRef.current = { byCountry, onOpen }
   })
 
-  const option = useMemo(() => buildOption(byCountry), [dataSig])
+  const option = useMemo(() => buildOption(byCountry), [dataSig, ready])
 
   useEffect(() => {
     if (!ready || !wrapRef.current) return
