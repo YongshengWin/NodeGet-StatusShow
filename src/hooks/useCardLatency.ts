@@ -3,11 +3,13 @@ import { taskQuery } from '../api/methods'
 import type { BackendPool } from '../api/pool'
 import type { CardLatencySummary, Node, TaskQueryResult } from '../types'
 
-const WINDOW_MS = 6 * 60 * 60 * 1000
+const WINDOW_MS = 30 * 60 * 1000
 const REFRESH_MS = 20_000
 const QUERY_TIMEOUT_MS = 12_000
-const QUERY_LIMIT = 64
-const SAMPLE_COUNT = 22
+const QUERY_LIMIT = 160
+const SAMPLE_COUNT = 30
+const BUCKET_MS = WINDOW_MS / SAMPLE_COUNT
+const PREFERRED_CRON_SOURCE = '浙江移动'
 
 const EMPTY_SUMMARY: CardLatencySummary = {
   current: null,
@@ -26,24 +28,56 @@ function normalizeTs(ts: number) {
   return ts < 1_000_000_000_000 ? ts * 1000 : ts
 }
 
-function summarize(rows: TaskQueryResult[], type: 'tcp_ping' | 'ping'): CardLatencySummary {
-  const recent = [...rows]
-    .sort((a, b) => normalizeTs(a.timestamp) - normalizeTs(b.timestamp))
-    .slice(-SAMPLE_COUNT)
+function preferCronSource(rows: TaskQueryResult[]) {
+  const preferred = rows.filter(row => (row.cron_source || '').includes(PREFERRED_CRON_SOURCE))
+  return preferred.length ? preferred : rows
+}
 
-  if (!recent.length) return EMPTY_SUMMARY
+function summarize(rows: TaskQueryResult[], type: 'tcp_ping' | 'ping', now = Date.now()): CardLatencySummary {
+  const scoped = preferCronSource(rows)
+  if (!scoped.length) return EMPTY_SUMMARY
 
-  const samples = recent.map(row => ({
-    timestamp: normalizeTs(row.timestamp),
-    value: pickValue(row, type),
+  const start = now - WINDOW_MS
+  const buckets = Array.from({ length: SAMPLE_COUNT }, (_, index) => ({
+    timestamp: start + index * BUCKET_MS,
+    values: [] as number[],
+    total: 0,
+    failed: 0,
+  }))
+
+  for (const row of scoped) {
+    const ts = normalizeTs(row.timestamp)
+    if (ts < start || ts > now) continue
+    const index = Math.min(SAMPLE_COUNT - 1, Math.max(0, Math.floor((ts - start) / BUCKET_MS)))
+    const bucket = buckets[index]
+    bucket.total++
+    const value = pickValue(row, type)
+    if (value == null) bucket.failed++
+    else bucket.values.push(value)
+  }
+
+  const samples = buckets.map(bucket => ({
+    timestamp: bucket.timestamp,
+    value: bucket.values.length
+      ? bucket.values.reduce((sum, value) => sum + value, 0) / bucket.values.length
+      : null,
+    total: bucket.total,
+    failed: bucket.failed,
   }))
   const vals = samples.flatMap(sample => (sample.value == null ? [] : [sample.value]))
-  const current = [...samples].reverse().find(sample => sample.value != null)?.value ?? null
+  const current =
+    [...scoped]
+      .sort((a, b) => normalizeTs(a.timestamp) - normalizeTs(b.timestamp))
+      .reverse()
+      .map(row => pickValue(row, type))
+      .find(value => value != null) ?? null
+  const total = samples.reduce((sum, sample) => sum + sample.total, 0)
+  const failed = samples.reduce((sum, sample) => sum + sample.failed, 0)
 
   return {
     current,
     avg: vals.length ? vals.reduce((sum, v) => sum + v, 0) / vals.length : null,
-    lossRate: ((samples.length - vals.length) / samples.length) * 100,
+    lossRate: total ? (failed / total) * 100 : null,
     samples,
     loading: false,
   }
@@ -56,19 +90,27 @@ async function queryNode(entry: BackendPool['entries'][number], uuid: string) {
 
   const tcp = await taskQuery(
     entry.client,
+    [...common, { type: 'tcp_ping' }, { cron_source: `tcping-${PREFERRED_CRON_SOURCE}` }],
+    QUERY_TIMEOUT_MS,
+  ).catch(() => [])
+
+  if (tcp.length) return summarize(tcp, 'tcp_ping', now)
+
+  const tcpAll = await taskQuery(
+    entry.client,
     [...common, { type: 'tcp_ping' }],
     QUERY_TIMEOUT_MS,
   ).catch(() => [])
 
-  if (tcp.length) return summarize(tcp, 'tcp_ping')
+  if (tcpAll.length) return summarize(tcpAll, 'tcp_ping', now)
 
   const ping = await taskQuery(
     entry.client,
-    [...common, { type: 'ping' }],
+    [...common, { type: 'ping' }, { cron_source: `ping-${PREFERRED_CRON_SOURCE}` }],
     QUERY_TIMEOUT_MS,
   ).catch(() => [])
 
-  return summarize(ping, 'ping')
+  return summarize(ping, 'ping', now)
 }
 
 function makeKey(nodes: Node[]) {

@@ -10,7 +10,7 @@ import { cn, loadColor } from '../utils/cn'
 import type { CardLatencySummary, LatencyStripSample, Node } from '../types'
 import type { ReactNode } from 'react'
 
-const LATENCY_BAR_COUNT = 22
+const LATENCY_BAR_COUNT = 30
 
 export function NodeCard({ node, latency }: { node: Node; latency?: CardLatencySummary }) {
   const u = deriveUsage(node)
@@ -95,6 +95,8 @@ function LatencyStrip({ latency }: { latency?: CardLatencySummary }) {
       : Array.from({ length: LATENCY_BAR_COUNT }, (_, i) => ({
           timestamp: i,
           value: null,
+          total: 0,
+          failed: 0,
         }))
   const current = latency?.current ?? null
   const loss = latency?.lossRate ?? null
@@ -130,7 +132,7 @@ function MiniBars({
   label: string
   value: string
   samples: LatencyStripSample[]
-  colorFor: (value: number | null) => string
+  colorFor: (sample: LatencyStripSample) => string
   empty: boolean
 }) {
   return (
@@ -143,7 +145,7 @@ function MiniBars({
         {samples.map((sample, index) => (
           <span
             key={`${sample.timestamp}-${index}`}
-            className={cn('flex-1 rounded-[2px]', empty ? 'bg-muted' : colorFor(sample.value))}
+            className={cn('flex-1 rounded-[2px]', empty ? 'bg-muted' : colorFor(sample))}
           />
         ))}
       </div>
@@ -151,7 +153,9 @@ function MiniBars({
   )
 }
 
-function latencyBarColor(value: number | null) {
+function latencyBarColor(sample: LatencyStripSample) {
+  const value = sample.value
+  if (!sample.total) return 'bg-muted'
   if (value == null) return 'bg-muted'
   if (value <= 80) return 'bg-emerald-400'
   if (value <= 180) return 'bg-lime-400'
@@ -159,8 +163,9 @@ function latencyBarColor(value: number | null) {
   return 'bg-rose-500'
 }
 
-function lossBarColor(value: number | null) {
-  if (value == null) return 'bg-rose-400'
+function lossBarColor(sample: LatencyStripSample) {
+  if (!sample.total) return 'bg-muted'
+  if (sample.failed > 0) return 'bg-rose-400'
   return 'bg-emerald-400'
 }
 

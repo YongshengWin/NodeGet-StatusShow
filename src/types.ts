@@ -161,6 +161,8 @@ export type LatencyType = 'ping' | 'tcp_ping'
 export interface LatencyStripSample {
   timestamp: number
   value: number | null
+  total: number
+  failed: number
 }
 
 export interface CardLatencySummary {
