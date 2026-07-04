@@ -7,10 +7,12 @@ import { StatusDot } from './StatusDot'
 import { bytes, pct, relativeAge, uptime } from '../utils/format'
 import { cpuLabel, deriveUsage, displayName, distroLogo, osLabel, virtLabel } from '../utils/derive'
 import { cn, loadColor } from '../utils/cn'
-import type { Node } from '../types'
+import type { CardLatencySummary, LatencyStripSample, Node } from '../types'
 import type { ReactNode } from 'react'
 
-export function NodeCard({ node }: { node: Node }) {
+const LATENCY_BAR_COUNT = 22
+
+export function NodeCard({ node, latency }: { node: Node; latency?: CardLatencySummary }) {
   const u = deriveUsage(node)
   const tags = Array.isArray(node.meta?.tags) ? node.meta.tags : []
   const os = osLabel(node)
@@ -68,6 +70,8 @@ export function NodeCard({ node }: { node: Node }) {
             </div>
           </div>
 
+          <LatencyStrip latency={latency} />
+
           {tags.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
                 {tags.map(t => (
@@ -80,6 +84,84 @@ export function NodeCard({ node }: { node: Node }) {
         </Card>
       </a>
   )
+}
+
+function LatencyStrip({ latency }: { latency?: CardLatencySummary }) {
+  const samples = latency?.samples ?? []
+  const hasSamples = samples.length > 0
+  const bars =
+    hasSamples
+      ? samples.slice(-LATENCY_BAR_COUNT)
+      : Array.from({ length: LATENCY_BAR_COUNT }, (_, i) => ({
+          timestamp: i,
+          value: null,
+        }))
+  const avg = latency?.avg ?? null
+  const loss = latency?.lossRate ?? null
+  const loading = Boolean(latency?.loading && !samples.length)
+
+  return (
+    <div className="pt-2.5 border-t border-dashed grid grid-cols-2 gap-3">
+      <MiniBars
+        label="延迟"
+        value={loading ? '…' : avg == null ? '—' : `${Math.round(avg)} ms`}
+        samples={bars}
+        colorFor={latencyBarColor}
+        empty={!hasSamples}
+      />
+      <MiniBars
+        label="丢包"
+        value={loading ? '…' : loss == null ? '—' : `${loss.toFixed(1)}%`}
+        samples={bars}
+        colorFor={lossBarColor}
+        empty={!hasSamples}
+      />
+    </div>
+  )
+}
+
+function MiniBars({
+  label,
+  value,
+  samples,
+  colorFor,
+  empty,
+}: {
+  label: string
+  value: string
+  samples: LatencyStripSample[]
+  colorFor: (value: number | null) => string
+  empty: boolean
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="flex items-center justify-between gap-2 text-xs">
+        <span className="text-muted-foreground">{label}</span>
+        <span className="font-mono tabular-nums">{value}</span>
+      </div>
+      <div className="mt-1.5 flex h-4 gap-0.5" aria-hidden="true">
+        {samples.map((sample, index) => (
+          <span
+            key={`${sample.timestamp}-${index}`}
+            className={cn('flex-1 rounded-[2px]', empty ? 'bg-muted' : colorFor(sample.value))}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function latencyBarColor(value: number | null) {
+  if (value == null) return 'bg-muted'
+  if (value <= 80) return 'bg-emerald-400'
+  if (value <= 180) return 'bg-lime-400'
+  if (value <= 350) return 'bg-amber-400'
+  return 'bg-rose-500'
+}
+
+function lossBarColor(value: number | null) {
+  if (value == null) return 'bg-rose-400'
+  return 'bg-emerald-400'
 }
 
 function Stat({ icon: Icon, children }: { icon: LucideIcon; children: ReactNode }) {

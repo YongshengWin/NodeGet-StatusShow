@@ -158,6 +158,18 @@ export type Sort =
 
 export type LatencyType = 'ping' | 'tcp_ping'
 
+export interface LatencyStripSample {
+  timestamp: number
+  value: number | null
+}
+
+export interface CardLatencySummary {
+  avg: number | null
+  lossRate: number | null
+  samples: LatencyStripSample[]
+  loading: boolean
+}
+
 export interface Usage {
   cpu?: number
   mem?: number

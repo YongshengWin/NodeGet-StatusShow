@@ -11,6 +11,7 @@ import { NodeTable } from './components/NodeTable'
 import { NodeDetail } from './components/NodeDetail'
 import { TagFilter } from './components/TagFilter'
 import { RegionFilter } from './components/RegionFilter'
+import { useCardLatency } from './hooks/useCardLatency'
 
 const WorldMap = lazy(() =>
   import('./components/WorldMap').then(m => ({ default: m.WorldMap })),
@@ -159,6 +160,7 @@ export function App() {
   }, [nodes, query, activeTag, activeRegion, sort, regions])
 
   const selectedNode = selected ? nodes.get(selected) || null : null
+  const cardLatency = useCardLatency(pool, view === 'cards' ? list : [], view === 'cards')
 
   if (configError) {
     return (
@@ -223,7 +225,7 @@ export function App() {
         {!empty && view === 'cards' && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {list.map(n => (
-              <NodeCard key={n.uuid} node={n} />
+              <NodeCard key={n.uuid} node={n} latency={cardLatency[n.uuid]} />
             ))}
           </div>
         )}
