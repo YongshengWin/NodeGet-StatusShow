@@ -17,6 +17,9 @@ const HEAT = [
   [251, 146, 60],
   [194, 65, 12],
 ]
+const EMPTY_AREA = 'rgba(71,85,105,0.28)'
+const EMPTY_AREA_HOVER = 'rgba(100,116,139,0.42)'
+const EMPTY_BORDER = 'rgba(148,163,184,0.22)'
 
 const cnameMap = new Map<string, string>()
 const knownA2 = new Set<string>()
@@ -248,8 +251,46 @@ export function WorldMap({ nodes, onOpen }: Props) {
 
 function buildOption(byCountry: Map<string, CountryEntry>) {
   const entries = [...byCountry.entries()].filter(([a2]) => knownA2.has(a2))
-  const data = entries.map(([a2, e]) => ({ name: a2, value: e.online + e.offline }))
-  const max = data.reduce((m, d) => Math.max(m, d.value), 0)
+  const max = entries.reduce((m, [, e]) => Math.max(m, e.online + e.offline), 0)
+  const data = [...knownA2].map(a2 => {
+    const e = byCountry.get(a2)
+    if (!e) {
+      return {
+        name: a2,
+        value: 0,
+        itemStyle: {
+          areaColor: EMPTY_AREA,
+          borderColor: EMPTY_BORDER,
+          borderWidth: 0.35,
+        },
+        emphasis: {
+          itemStyle: {
+            areaColor: EMPTY_AREA_HOVER,
+          },
+        },
+      }
+    }
+
+    const value = e.online + e.offline
+    const t = max > 0 ? value / max : 0
+    const color = e.online > 0 ? heatColor(0.25 + 0.75 * t) : 'rgb(248,113,113)'
+    return {
+      name: a2,
+      value,
+      itemStyle: {
+        areaColor: color,
+        borderColor: 'rgba(255,237,213,0.72)',
+        borderWidth: 0.65,
+      },
+      emphasis: {
+        itemStyle: {
+          areaColor: color,
+          borderColor: 'rgba(255,247,237,0.95)',
+          borderWidth: 1,
+        },
+      },
+    }
+  })
   const tinyMarkers = entries
     .map(([a2, e]) => {
       const c = tinyCenter.get(a2)
@@ -274,23 +315,6 @@ function buildOption(byCountry: Map<string, CountryEntry>) {
 
   return {
     backgroundColor: 'transparent',
-    visualMap: {
-      type: 'continuous' as const,
-      min: 1,
-      max: Math.max(max, 1),
-      show: max > 0,
-      seriesIndex: 0,
-      left: 16,
-      bottom: 16,
-      itemWidth: 10,
-      itemHeight: 90,
-      orient: 'horizontal' as const,
-      text: ['多', '少'],
-      textStyle: { color: 'rgba(255,255,255,0.55)', fontSize: 10 },
-      inRange: { color: ['#fed7aa', '#fb923c', '#c2410c'] },
-      outOfRange: { color: 'rgba(148,163,184,0.16)' },
-      calculable: false,
-    },
     tooltip: {
       trigger: 'item' as const,
       backgroundColor: 'rgba(20,22,28,0.94)',
@@ -320,13 +344,13 @@ function buildOption(byCountry: Map<string, CountryEntry>) {
         layoutSize: '100%',
         selectedMode: false,
         itemStyle: {
-          areaColor: 'rgba(148,163,184,0.16)',
-          borderColor: 'rgba(148,163,184,0.32)',
+          areaColor: EMPTY_AREA,
+          borderColor: EMPTY_BORDER,
           borderWidth: 0.4,
         },
         emphasis: {
           label: { show: false },
-          itemStyle: { areaColor: '#fb923c' },
+          itemStyle: { areaColor: EMPTY_AREA_HOVER },
         },
         label: { show: false },
         data,
