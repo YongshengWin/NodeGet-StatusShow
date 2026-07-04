@@ -4,12 +4,13 @@ import type { BackendPool } from '../api/pool'
 import type { CardLatencySummary, Node, TaskQueryResult } from '../types'
 
 const WINDOW_MS = 6 * 60 * 60 * 1000
-const REFRESH_MS = 60_000
+const REFRESH_MS = 20_000
 const QUERY_TIMEOUT_MS = 12_000
 const QUERY_LIMIT = 64
 const SAMPLE_COUNT = 22
 
 const EMPTY_SUMMARY: CardLatencySummary = {
+  current: null,
   avg: null,
   lossRate: null,
   samples: [],
@@ -37,8 +38,10 @@ function summarize(rows: TaskQueryResult[], type: 'tcp_ping' | 'ping'): CardLate
     value: pickValue(row, type),
   }))
   const vals = samples.flatMap(sample => (sample.value == null ? [] : [sample.value]))
+  const current = [...samples].reverse().find(sample => sample.value != null)?.value ?? null
 
   return {
+    current,
     avg: vals.length ? vals.reduce((sum, v) => sum + v, 0) / vals.length : null,
     lossRate: ((samples.length - vals.length) / samples.length) * 100,
     samples,

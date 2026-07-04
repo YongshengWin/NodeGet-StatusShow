@@ -96,7 +96,7 @@ function LatencyStrip({ latency }: { latency?: CardLatencySummary }) {
           timestamp: i,
           value: null,
         }))
-  const avg = latency?.avg ?? null
+  const current = latency?.current ?? null
   const loss = latency?.lossRate ?? null
   const loading = Boolean(latency?.loading && !samples.length)
 
@@ -104,7 +104,7 @@ function LatencyStrip({ latency }: { latency?: CardLatencySummary }) {
     <div className="pt-2.5 border-t border-dashed grid grid-cols-2 gap-3">
       <MiniBars
         label="延迟"
-        value={loading ? '…' : avg == null ? '—' : `${Math.round(avg)} ms`}
+        value={loading ? '…' : current == null ? '—' : `${Math.round(current)} ms`}
         samples={bars}
         colorFor={latencyBarColor}
         empty={!hasSamples}

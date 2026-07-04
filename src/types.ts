@@ -164,6 +164,7 @@ export interface LatencyStripSample {
 }
 
 export interface CardLatencySummary {
+  current: number | null
   avg: number | null
   lossRate: number | null
   samples: LatencyStripSample[]
