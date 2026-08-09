@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { taskQuery } from '../api/methods'
 import type { BackendPool } from '../api/pool'
 import type { CardLatencySummary, Node, TaskQueryResult } from '../types'
+import { nodeLatencyPreference, scopeNodeLatencyRows } from '../utils/nodeLatency'
 
 const WINDOW_MS = 30 * 60 * 1000
 const REFRESH_MS = 20_000
@@ -83,10 +84,42 @@ function summarize(rows: TaskQueryResult[], type: 'tcp_ping' | 'ping', now = Dat
   }
 }
 
-async function queryNode(entry: BackendPool['entries'][number], uuid: string) {
+async function queryNode(entry: BackendPool['entries'][number], node: Node) {
   const now = Date.now()
   const window: [number, number] = [now - WINDOW_MS, now]
+  const uuid = node.uuid
   const common = [{ uuid }, { timestamp_from_to: window }, { limit: QUERY_LIMIT }]
+  const preference = nodeLatencyPreference(node)
+
+  if (preference) {
+    const [tcp, ping] = await Promise.all([
+      taskQuery(
+        entry.client,
+        [...common, { type: 'tcp_ping' }],
+        QUERY_TIMEOUT_MS,
+      ).catch(() => []),
+      taskQuery(
+        entry.client,
+        [...common, { type: 'ping' }],
+        QUERY_TIMEOUT_MS,
+      ).catch(() => []),
+    ])
+
+    const scopedTcp = scopeNodeLatencyRows(node, tcp, 'tcp_ping')
+    const scopedPing = scopeNodeLatencyRows(node, ping, 'ping')
+    const tcpSummary = summarize(scopedTcp, 'tcp_ping', now)
+    const pingSummary = summarize(scopedPing, 'ping', now)
+    const summary =
+      tcpSummary.current != null
+        ? tcpSummary
+        : pingSummary.current != null
+          ? pingSummary
+          : scopedTcp.length
+            ? tcpSummary
+            : pingSummary
+
+    return { ...summary, target: preference.target }
+  }
 
   const tcp = await taskQuery(
     entry.client,
@@ -143,7 +176,7 @@ export function useCardLatency(pool: BackendPool | null, nodes: Node[], enabled:
         nodes.map(async node => {
           const entry = pool.entries.find(e => e.name === node.source)
           if (!entry) return [node.uuid, EMPTY_SUMMARY] as const
-          return [node.uuid, await queryNode(entry, node.uuid)] as const
+          return [node.uuid, await queryNode(entry, node)] as const
         }),
       )
 

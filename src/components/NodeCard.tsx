@@ -105,7 +105,7 @@ function LatencyStrip({ latency }: { latency?: CardLatencySummary }) {
   return (
     <div className="pt-2.5 border-t border-dashed grid grid-cols-2 gap-3">
       <MiniBars
-        label="延迟"
+        label={latency?.target ? `延迟 · ${latency.target}` : '延迟'}
         value={loading ? '…' : current == null ? '—' : `${Math.round(current)} ms`}
         samples={bars}
         colorFor={latencyBarColor}

@@ -3,9 +3,17 @@ import { taskQuery } from '../api/methods'
 import type { BackendPool } from '../api/pool'
 import type { TaskQueryResult } from '../types'
 
-export const LATENCY_WINDOW_LABEL = '24 小时'
+const HOUR_MS = 60 * 60 * 1000
 
-const WINDOW_MS = 24 * 60 * 60 * 1000
+export const LATENCY_WINDOWS = [
+  { label: '1 小时', value: HOUR_MS },
+  { label: '6 小时', value: 6 * HOUR_MS },
+  { label: '12 小时', value: 12 * HOUR_MS },
+  { label: '24 小时', value: 24 * HOUR_MS },
+] as const
+
+export const DEFAULT_LATENCY_WINDOW_MS = LATENCY_WINDOWS[0].value
+
 const REFRESH_MS = 60_000
 const INCREMENTAL_OVERLAP_MS = 2 * 60 * 1000
 const FULL_CACHE_TTL_MS = 10 * 60 * 1000
@@ -35,8 +43,8 @@ function clean(rows: TaskQueryResult[] | undefined): TaskQueryResult[] {
     .sort((a, b) => normalizeTs(a.timestamp) - normalizeTs(b.timestamp))
 }
 
-function trimWindow(rows: TaskQueryResult[], now: number) {
-  const from = now - WINDOW_MS
+function trimWindow(rows: TaskQueryResult[], now: number, windowMs: number) {
+  const from = now - windowMs
   const trimmed = clean(rows).filter(r => {
     const ts = normalizeTs(r.timestamp)
     return ts >= from && ts <= now
@@ -48,11 +56,12 @@ function mergeRows(
   current: TaskQueryResult[],
   incoming: TaskQueryResult[] | undefined,
   now: number,
+  windowMs: number,
 ) {
   const map = new Map<string, TaskQueryResult>()
   for (const row of current) map.set(rowKey(row), row)
   for (const row of clean(incoming)) map.set(rowKey(row), row)
-  return trimWindow([...map.values()], now)
+  return trimWindow([...map.values()], now, windowMs)
 }
 
 function latestTimestamp(rows: TaskQueryResult[]) {
@@ -61,17 +70,23 @@ function latestTimestamp(rows: TaskQueryResult[]) {
   return latest
 }
 
-function queryWindow(rows: TaskQueryResult[], now: number, full: boolean): [number, number] {
-  if (full) return [now - WINDOW_MS, now]
+function queryWindow(
+  rows: TaskQueryResult[],
+  now: number,
+  windowMs: number,
+  full: boolean,
+): [number, number] {
+  if (full) return [now - windowMs, now]
   const latest = latestTimestamp(rows)
   const from = latest ? latest - INCREMENTAL_OVERLAP_MS : now - INCREMENTAL_OVERLAP_MS
-  return [Math.max(now - WINDOW_MS, from), now]
+  return [Math.max(now - windowMs, from), now]
 }
 
 export function useNodeLatency(
   pool: BackendPool | null,
   source: string | null,
   uuid: string | null,
+  windowMs = DEFAULT_LATENCY_WINDOW_MS,
 ) {
   const [pingData, setPingData] = useState<TaskQueryResult[]>([])
   const [tcpData, setTcpData] = useState<TaskQueryResult[]>([])
@@ -86,11 +101,11 @@ export function useNodeLatency(
     const entry = pool.entries.find(e => e.name === source)
     if (!entry) return
 
-    const cacheKey = `${source}:${uuid}`
+    const cacheKey = `${source}:${uuid}:${windowMs}`
     const now = Date.now()
     const cached = latencyCache.get(cacheKey)
-    let currentPing = cached ? trimWindow(cached.ping, now) : []
-    let currentTcp = cached ? trimWindow(cached.tcp, now) : []
+    let currentPing = cached ? trimWindow(cached.ping, now, windowMs) : []
+    let currentTcp = cached ? trimWindow(cached.tcp, now, windowMs) : []
     const needsFullFetch = !cached || now - cached.fullFetchedAt > FULL_CACHE_TTL_MS
     let cancelled = false
     let inFlight = false
@@ -110,8 +125,8 @@ export function useNodeLatency(
       if (inFlight) return
       inFlight = true
       const now = Date.now()
-      const pingWindow = queryWindow(currentPing, now, full)
-      const tcpWindow = queryWindow(currentTcp, now, full)
+      const pingWindow = queryWindow(currentPing, now, windowMs, full)
+      const tcpWindow = queryWindow(currentTcp, now, windowMs, full)
       setLoading(true)
 
       try {
@@ -135,11 +150,11 @@ export function useNodeLatency(
         const tcpOk = tcp.status === 'fulfilled'
 
         if (pingOk) {
-          currentPing = mergeRows(full ? [] : currentPing, ping.value, receivedAt)
+          currentPing = mergeRows(full ? [] : currentPing, ping.value, receivedAt, windowMs)
           setPingData(currentPing)
         }
         if (tcpOk) {
-          currentTcp = mergeRows(full ? [] : currentTcp, tcp.value, receivedAt)
+          currentTcp = mergeRows(full ? [] : currentTcp, tcp.value, receivedAt, windowMs)
           setTcpData(currentTcp)
         }
 
@@ -171,7 +186,7 @@ export function useNodeLatency(
       clearInterval(timer)
       document.removeEventListener('visibilitychange', refresh)
     }
-  }, [pool, source, uuid])
+  }, [pool, source, uuid, windowMs])
 
   return { pingData, tcpData, loading }
 }

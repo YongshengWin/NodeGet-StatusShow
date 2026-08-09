@@ -19,12 +19,17 @@ import { bytes, pct, relativeAge, uptime } from '../utils/format'
 import { deriveUsage, displayName, distroLogo, osLabel, virtLabel } from '../utils/derive'
 import { cycleProgress, hasCost, remainingDays, remainingValue } from '../utils/cost'
 import { cn, strokeColor } from '../utils/cn'
+import { nodeLatencyPreference, scopeNodeLatencyRows } from '../utils/nodeLatency'
 import {
   buildLatencyChart,
   computeLatencyStats,
   type LatencyStats,
 } from '../utils/latency'
-import { LATENCY_WINDOW_LABEL, useNodeLatency } from '../hooks/useNodeLatency'
+import {
+  DEFAULT_LATENCY_WINDOW_MS,
+  LATENCY_WINDOWS,
+  useNodeLatency,
+} from '../hooks/useNodeLatency'
 import type { BackendPool } from '../api/pool'
 import type { HistorySample, LatencyType, Node, NodeMeta, TaskQueryResult } from '../types'
 
@@ -46,6 +51,7 @@ export function NodeDetail({ node, onClose, showSource, pool }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const headerRef = useRef<HTMLDivElement>(null)
   const [stuck, setStuck] = useState(false)
+  const [latencyWindowMs, setLatencyWindowMs] = useState(DEFAULT_LATENCY_WINDOW_MS)
 
   useEffect(() => {
     if (!node) return
@@ -73,11 +79,27 @@ export function NodeDetail({ node, onClose, showSource, pool }: Props) {
     return () => el.removeEventListener('scroll', onScroll)
   }, [node])
 
+  useEffect(() => {
+    setLatencyWindowMs(DEFAULT_LATENCY_WINDOW_MS)
+  }, [node?.uuid])
+
   const { pingData, tcpData, loading: latencyLoading } = useNodeLatency(
     pool,
     node?.source ?? null,
     node?.uuid ?? null,
+    latencyWindowMs,
   )
+  const latencyPreference = nodeLatencyPreference(node)
+  const scopedPingData = useMemo(
+    () => scopeNodeLatencyRows(node, pingData, 'ping'),
+    [node, pingData],
+  )
+  const scopedTcpData = useMemo(
+    () => scopeNodeLatencyRows(node, tcpData, 'tcp_ping'),
+    [node, tcpData],
+  )
+  const latencyWindowLabel =
+    LATENCY_WINDOWS.find(option => option.value === latencyWindowMs)?.label ?? '1 小时'
 
   if (!node) return null
 
@@ -200,13 +222,39 @@ export function NodeDetail({ node, onClose, showSource, pool }: Props) {
           </Section>
         )}
 
+        <div className="flex items-center justify-end gap-2">
+          <span className="text-xs text-muted-foreground">延迟范围</span>
+          <div className="inline-flex rounded-md border bg-muted/20 p-0.5" aria-label="延迟时间范围">
+            {LATENCY_WINDOWS.map(option => (
+              <Button
+                key={option.value}
+                type="button"
+                size="sm"
+                variant={latencyWindowMs === option.value ? 'secondary' : 'ghost'}
+                className="h-7 px-2.5 text-xs"
+                aria-pressed={latencyWindowMs === option.value}
+                onClick={() => setLatencyWindowMs(option.value)}
+              >
+                {option.label.replace(' 小时', 'h')}
+              </Button>
+            ))}
+          </div>
+        </div>
+
         <LatencyBlock
-          title="TCP Ping"
-          rows={tcpData}
+          title={latencyPreference ? `TCP Ping → ${latencyPreference.target}` : 'TCP Ping'}
+          rows={scopedTcpData}
           type="tcp_ping"
           loading={latencyLoading}
+          windowLabel={latencyWindowLabel}
         />
-        <LatencyBlock title="Ping" rows={pingData} type="ping" loading={latencyLoading} />
+        <LatencyBlock
+          title={latencyPreference ? `Ping → ${latencyPreference.target}` : 'Ping'}
+          rows={scopedPingData}
+          type="ping"
+          loading={latencyLoading}
+          windowLabel={latencyWindowLabel}
+        />
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
           <Section title="系统">
@@ -367,6 +415,7 @@ interface LatencyBlockProps {
   rows: TaskQueryResult[]
   type: LatencyType
   loading: boolean
+  windowLabel: string
 }
 
 const ms = (v: number) => `${v.toFixed(1)} ms`
@@ -378,7 +427,7 @@ const latencyTime = (t: number | string) =>
     minute: '2-digit',
   })
 
-function LatencyBlock({ title, rows, type, loading }: LatencyBlockProps) {
+function LatencyBlock({ title, rows, type, loading, windowLabel }: LatencyBlockProps) {
   const { data, series } = useMemo(() => buildLatencyChart(rows, type), [rows, type])
   const stats = useMemo(() => computeLatencyStats(rows, type), [rows, type])
   const [hidden, setHidden] = useState<Set<string>>(() => new Set())
@@ -395,7 +444,7 @@ function LatencyBlock({ title, rows, type, loading }: LatencyBlockProps) {
     })
 
   return (
-    <Section title={`${title} · 近 ${LATENCY_WINDOW_LABEL}`}>
+    <Section title={`${title} · 近 ${windowLabel}`}>
       <div className="relative h-60">
         {empty && (
           <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
