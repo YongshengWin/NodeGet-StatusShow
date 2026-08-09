@@ -171,6 +171,7 @@ export interface CardLatencySummary {
   lossRate: number | null
   samples: LatencyStripSample[]
   loading: boolean
+  target?: string
 }
 
 export interface Usage {
