@@ -91,7 +91,7 @@ async function queryNode(entry: BackendPool['entries'][number], node: Node) {
   const common = [{ uuid }, { timestamp_from_to: window }, { limit: QUERY_LIMIT }]
   const preference = nodeLatencyPreference(node)
 
-  if (preference) {
+  if (preference && preference.includeInCard !== false) {
     const [tcp, ping] = await Promise.all([
       taskQuery(
         entry.client,
