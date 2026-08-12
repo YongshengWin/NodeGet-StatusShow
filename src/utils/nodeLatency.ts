@@ -17,6 +17,11 @@ const ZHEJIANG_MOBILE_IPV6_SOURCES: Record<LatencyType, string[]> = {
   tcp_ping: [...ZHEJIANG_MOBILE_SOURCES.tcp_ping, 'tcping-浙江移动-IPv6'],
 }
 
+const SG_LEGEND_IPV4_SOURCES: Record<LatencyType, string[]> = {
+  ping: [...ZHEJIANG_MOBILE_SOURCES.ping, 'ping-香港'],
+  tcp_ping: [...ZHEJIANG_MOBILE_SOURCES.tcp_ping, 'tcping-香港'],
+}
+
 const NODE_LATENCY_PREFERENCES: Record<string, NodeLatencyPreference> = {
   'd8adcfef-b086-47b4-ac73-41e1ef08755c': {
     target: 'US-LAX',
@@ -30,10 +35,10 @@ const NODE_LATENCY_PREFERENCES: Record<string, NodeLatencyPreference> = {
       tcp_ping: { tcping: 'tcping-US-LAX' },
     },
   },
-  // SG-Legend only shows the existing Zhejiang Mobile dual-stack probes.
+  // SG-Legend is IPv4-only and also probes a public Hong Kong looking glass.
   '271dda72-8f5b-4b84-a413-8e09b70a1994': {
-    target: '浙江移动',
-    sources: ZHEJIANG_MOBILE_SOURCES,
+    target: '浙江移动 / 香港',
+    sources: SG_LEGEND_IPV4_SOURCES,
     includeInCard: false,
   },
   // HK-Zouter and JP-Zouter also show dedicated IPv6 probe series.
