@@ -172,6 +172,9 @@ export interface CardLatencySummary {
   samples: LatencyStripSample[]
   loading: boolean
   target?: string
+  error?: boolean
+  latestFailed?: boolean
+  updatedAt?: number
 }
 
 export interface Usage {
